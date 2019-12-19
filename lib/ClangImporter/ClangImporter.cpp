@@ -1076,10 +1076,6 @@ ClangImporter::create(ASTContext &ctx, const ClangImporterOptions &importerOpts,
   // read them later.
   instance.getLangOpts().NeededByPCHOrCompilationUsesPCH = true;
 
-  // Make sure to not trigger extra rebuilds on identical files with mismatching
-  // timestamps.
-  instance.getHeaderSearchOpts().ValidateASTInputFilesContent = true;
-
   if (importerOpts.Mode == ClangImporterOptions::Modes::PrecompiledModule)
     return importer;
 
@@ -1757,18 +1753,24 @@ ModuleDecl *ClangImporter::Implementation::loadModuleClang(
   return finishLoadingClangModule(clangModule, /*preferOverlay=*/false);
 }
 
-ModuleDecl *ClangImporter::loadModule(
-    SourceLoc importLoc,
-    ArrayRef<std::pair<Identifier, SourceLoc>> path) {
-  ModuleDecl *MD = Impl.loadModuleClang(importLoc, path);
+ModuleDecl *
+ClangImporter::loadModule(SourceLoc importLoc,
+                          ArrayRef<std::pair<Identifier, SourceLoc>> path) {
+  return Impl.loadModule(importLoc, path);
+}
+
+ModuleDecl *ClangImporter::Implementation::loadModule(
+    SourceLoc importLoc, ArrayRef<std::pair<Identifier, SourceLoc>> path) {
+  ModuleDecl *MD = nullptr;
+  if (!DisableSourceImport)
+    MD = loadModuleClang(importLoc, path);
   if (!MD)
-    MD = Impl.loadModuleDWARF(importLoc, path);
+    MD = loadModuleDWARF(importLoc, path);
   return MD;
 }
 
 ModuleDecl *ClangImporter::Implementation::finishLoadingClangModule(
-    const clang::Module *clangModule,
-    bool findOverlay) {
+    const clang::Module *clangModule, bool findOverlay) {
   assert(clangModule);
 
   // Bump the generation count.
@@ -1954,6 +1956,7 @@ ClangImporter::Implementation::Implementation(
       BridgingHeaderLookupTable(new SwiftLookupTable(nullptr)),
       BuffersForDiagnostics(ctx.SourceMgr),
       platformAvailability(ctx.LangOpts), nameImporter(),
+      DisableSourceImport(opts.DisableSourceImport),
       DWARFImporter(dwarfImporterDelegate) {}
 
 ClangImporter::Implementation::~Implementation() {
@@ -2613,7 +2616,8 @@ void ClangImporter::lookupTypeDecl(
   clang::LookupResult lookupResult(sema, clangName, clang::SourceLocation(),
                                    lookupKind);
   bool foundViaClang = false;
-  if (sema.LookupName(lookupResult, /*Scope=*/nullptr)) {
+  if (!Impl.DisableSourceImport &&
+      sema.LookupName(lookupResult, /*Scope=*/nullptr)) {
     for (auto clangDecl : lookupResult) {
       if (!isa<clang::TypeDecl>(clangDecl) &&
           !isa<clang::ObjCContainerDecl>(clangDecl) &&

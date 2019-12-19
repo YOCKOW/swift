@@ -2003,7 +2003,8 @@ static uint8_t getRawStableAutoDiffDerivativeFunctionKind(
     swift::AutoDiffDerivativeFunctionKind kind) {
   switch (kind) {
   case swift::AutoDiffDerivativeFunctionKind::JVP:
-    return uint8_t(serialization::AutoDiffDerivativeFunctionKind::JVP);  case swift::AutoDiffDerivativeFunctionKind::VJP:
+    return uint8_t(serialization::AutoDiffDerivativeFunctionKind::JVP);
+  case swift::AutoDiffDerivativeFunctionKind::VJP:
     return uint8_t(serialization::AutoDiffDerivativeFunctionKind::VJP);
   }
   llvm_unreachable("bad derivative function kind");
@@ -2357,6 +2358,31 @@ class Serializer::DeclSerializer : public DeclVisitor<DeclSerializer> {
       DerivativeDeclAttrLayout::emitRecord(
           S.Out, S.ScratchRecord, abbrCode, attr->isImplicit(), origNameId,
           origDeclID, derivativeKind, indices);
+      return;
+    }
+
+    case DAK_Transpose: {
+      auto abbrCode = S.DeclTypeAbbrCodes[TransposeDeclAttrLayout::Code];
+      auto *attr = cast<TransposeAttr>(DA);
+      // NOTE(TF-838): `@transpose` attribute serialization is blocked by
+      // `@transpose` attribute type-checking (TF-830), which resolves
+      // the original declaration.
+      if (!attr->getOriginalFunction())
+        return;
+      assert(attr->getOriginalFunction() &&
+             "`@transpose` attribute should have original declaration set "
+             "during construction or parsing");
+      auto origName = attr->getOriginalFunctionName().Name.getBaseName();
+      IdentifierID origNameId = S.addDeclBaseNameRef(origName);
+      DeclID origDeclID = S.addDeclRef(attr->getOriginalFunction());
+      auto *parameterIndices = attr->getParameterIndices();
+      assert(parameterIndices && "Parameter indices must be resolved");
+      SmallVector<bool, 4> indices;
+      for (unsigned i : range(parameterIndices->getCapacity()))
+        indices.push_back(parameterIndices->contains(i));
+      TransposeDeclAttrLayout::emitRecord(
+          S.Out, S.ScratchRecord, abbrCode, attr->isImplicit(), origNameId,
+          origDeclID, indices);
       return;
     }
 
