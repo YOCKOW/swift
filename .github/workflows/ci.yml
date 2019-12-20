@@ -9,11 +9,19 @@ jobs:
   test:
     strategy:
       matrix:
+        fail-fast: false
         os:
           - ubuntu-latest
           - macOS-latest
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v1
-    - run: ./utils/update-checkout --clone
-    - run: ./utils/build-script -RT
+    - uses: actions/checkout@v2
+    - name: Clone Required Repositories
+      run: ./utils/update-checkout --clone
+      continue-on-error: true
+    - name: Create Symbolic Links (Required in GitHub Actions...)
+      run: ln -s $(dirname "${GITHUB_WORKSPACE}")/llvm-project/{'clang','clang-tools-extra','compiler-rt','libcxx','lldb','llvm'} ../
+    - name: Show Installed Repositories
+      run: ls -la ../
+    - name: Build and Run tests
+      run: ./utils/build-script -RT
