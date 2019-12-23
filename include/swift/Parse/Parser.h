@@ -857,10 +857,18 @@ public:
                            TopLevelCodeDecl *TLCD);
 
   ParserStatus parseBraceItems(SmallVectorImpl<ASTNode> &Decls,
+                               BraceItemListKind Kind,
+                               BraceItemListKind ConditionalBlockKind,
+                               bool &IsFollowingGuard);
+  ParserStatus parseBraceItems(SmallVectorImpl<ASTNode> &Decls,
                                BraceItemListKind Kind =
                                    BraceItemListKind::Brace,
                                BraceItemListKind ConditionalBlockKind =
-                                   BraceItemListKind::Brace);
+                                   BraceItemListKind::Brace) {
+    bool IsFollowingGuard = false;
+    return parseBraceItems(Decls, Kind, ConditionalBlockKind,
+                           IsFollowingGuard);
+  }
   ParserResult<BraceStmt> parseBraceItemList(Diag<> ID);
   
   //===--------------------------------------------------------------------===//
@@ -869,7 +877,7 @@ public:
   /// Return true if parser is at the start of a decl or decl-import.
   bool isStartOfDecl();
 
-  bool parseTopLevel();
+  void parseTopLevel();
 
   /// Flags that control the parsing of declarations.
   enum ParseDeclFlags {
@@ -1514,6 +1522,8 @@ public:
   ///     identifier (',' identifier)* func-signature-result? 'in'
   /// \endverbatim
   ///
+  /// \param bracketRange The range of the brackets enclosing a capture list, if
+  /// present. Needed to offer fix-its for inserting 'self' into a capture list.
   /// \param captureList The entries in the capture list.
   /// \param params The parsed parameter list, or null if none was provided.
   /// \param arrowLoc The location of the arrow, if present.
@@ -1522,12 +1532,14 @@ public:
   ///
   /// \returns true if an error occurred, false otherwise.
   bool parseClosureSignatureIfPresent(
-                                SmallVectorImpl<CaptureListEntry> &captureList,
-                                      ParameterList *&params,
-                                      SourceLoc &throwsLoc,
-                                      SourceLoc &arrowLoc,
-                                      TypeRepr *&explicitResultType,
-                                      SourceLoc &inLoc);
+          SourceRange &bracketRange,
+          SmallVectorImpl<CaptureListEntry> &captureList,
+          VarDecl *&capturedSelfParamDecl,
+          ParameterList *&params,
+          SourceLoc &throwsLoc,
+          SourceLoc &arrowLoc,
+          TypeRepr *&explicitResultType,
+          SourceLoc &inLoc);
 
   Expr *parseExprAnonClosureArg();
   ParserResult<Expr> parseExprList(tok LeftTok, tok RightTok,
@@ -1642,12 +1654,8 @@ public:
   //===--------------------------------------------------------------------===//
   // Code completion second pass.
 
-  static void
-  performCodeCompletionSecondPass(PersistentParserState &ParserState,
-                                  CodeCompletionCallbacksFactory &Factory);
-
   void performCodeCompletionSecondPassImpl(
-      PersistentParserState::CodeCompletionDelayedDeclState &info);
+      CodeCompletionDelayedDeclState &info);
 };
 
 /// Describes a parsed declaration name.

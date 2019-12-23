@@ -1260,11 +1260,6 @@ class CodeCompletionCallbacksImpl : public CodeCompletionCallbacks {
     Builder.addTypeAnnotation(ST.getString());
   }
 
-  /// Set to true when we have delivered code completion results
-  /// to the \c Consumer.
-  bool DeliveredResults = false;
-
-
   Optional<std::pair<Type, ConcreteDeclRef>> typeCheckParsedExpr() {
     assert(ParsedExpr && "should have an expression");
 
@@ -1279,24 +1274,7 @@ class CodeCompletionCallbacksImpl : public CodeCompletionCallbacks {
     // typecheck again. rdar://21466394
     if (CheckKind == CompletionTypeCheckKind::Normal &&
         ParsedExpr->getType() && !ParsedExpr->getType()->is<ErrorType>()) {
-      auto refDecl = ParsedExpr->getReferencedDecl();
-      auto exprTy = ParsedExpr->getType();
-      if (!refDecl) {
-        // FIXME: do this in the not-already-type-checked branch too?
-        if (auto *apply = dyn_cast<SelfApplyExpr>(ParsedExpr)) {
-          refDecl = apply->getFn()->getReferencedDecl();
-        } else if (auto *apply = dyn_cast<ApplyExpr>(ParsedExpr)) {
-          // If this is an IUO, use the underlying non-optional type instead
-          auto fnDecl = apply->getFn()->getReferencedDecl();
-          if (auto FD = fnDecl.getDecl()) {
-            if (FD->isImplicitlyUnwrappedOptional()) {
-              if (auto OT = exprTy->getOptionalObjectType())
-                exprTy = OT;
-            }
-          }
-        }
-      }
-      return std::make_pair(exprTy, refDecl);
+      return getReferencedDecl(ParsedExpr);
     }
 
     ConcreteDeclRef ReferencedDecl = nullptr;
@@ -1353,7 +1331,6 @@ public:
       AttTargetDK = DK;
   }
 
-  void completeExpr() override;
   void completeDotExpr(Expr *E, SourceLoc DotLoc) override;
   void completeStmtOrExpr(CodeCompletionExpr *E) override;
   void completePostfixExprBeginning(CodeCompletionExpr *E) override;
@@ -1398,18 +1375,6 @@ private:
   void deliverCompletionResults();
 };
 } // end anonymous namespace
-
-void CodeCompletionCallbacksImpl::completeExpr() {
-  if (DeliveredResults)
-    return;
-
-  Parser::ParserPositionRAII RestorePosition(P);
-  P.restoreParserPosition(ExprBeginPosition);
-
-  // FIXME: implement fallback code completion.
-
-  deliverCompletionResults();
-}
 
 namespace {
 static bool isTopLevelContext(const DeclContext *DC) {
@@ -5649,7 +5614,6 @@ void CodeCompletionCallbacksImpl::deliverCompletionResults() {
   Consumer.handleResultsAndModules(CompletionContext, RequestedModules,
                                    DCForModules);
   RequestedModules.clear();
-  DeliveredResults = true;
 }
 
 void PrintingCodeCompletionConsumer::handleResults(

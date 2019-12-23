@@ -2866,6 +2866,16 @@ bool ValueDecl::isImplicitlyUnwrappedOptional() const {
     false);
 }
 
+bool ValueDecl::isLocalCapture() const {
+  auto *dc = getDeclContext();
+
+  if (auto *fd = dyn_cast<FuncDecl>(this))
+    if (isa<SourceFile>(dc))
+      return fd->hasTopLevelLocalContextCaptures();
+
+  return dc->isLocalContext();
+}
+
 ArrayRef<ValueDecl *>
 ValueDecl::getSatisfiedProtocolRequirements(bool Sorted) const {
   // Dig out the nominal type.
@@ -3660,8 +3670,6 @@ void NominalTypeDecl::addExtension(ExtensionDecl *extension) {
   // Add to the end of the list.
   LastExtension->NextExtension.setPointer(extension);
   LastExtension = extension;
-
-  addedExtension(extension);
 }
 
 ArrayRef<VarDecl *> NominalTypeDecl::getStoredProperties() const {
@@ -5249,6 +5257,7 @@ VarDecl::VarDecl(DeclKind kind, bool isStatic, VarDecl::Introducer introducer,
 {
   Bits.VarDecl.Introducer = unsigned(introducer);
   Bits.VarDecl.IsCaptureList = isCaptureList;
+  Bits.VarDecl.IsSelfParamCapture = false;
   Bits.VarDecl.IsDebuggerVar = false;
   Bits.VarDecl.IsLazyStorageProperty = false;
   Bits.VarDecl.HasNonPatternBindingInit = false;
@@ -6039,11 +6048,10 @@ AnyFunctionType::Param ParamDecl::toFunctionParam(Type type) const {
     type = ParamDecl::getVarargBaseTy(type);
 
   auto label = getArgumentName();
-  auto flags = ParameterTypeFlags::fromParameterType(type,
-                                                     isVariadic(),
-                                                     isAutoClosure(),
-                                                     isNonEphemeral(),
-                                                     getValueOwnership());
+  auto flags = ParameterTypeFlags::fromParameterType(
+      type, isVariadic(), isAutoClosure(), isNonEphemeral(),
+      getValueOwnership(),
+      /*isNoDerivative*/ false);
   return AnyFunctionType::Param(type, label, flags);
 }
 
@@ -6627,6 +6635,20 @@ BraceStmt *AbstractFunctionDecl::getBody(bool canSynthesize) const {
   return evaluateOrDefault(ctx.evaluator,
                            ParseAbstractFunctionBodyRequest{mutableThis},
                            nullptr);
+}
+
+void AbstractFunctionDecl::setBody(BraceStmt *S, BodyKind NewBodyKind) {
+  assert(getBodyKind() != BodyKind::Skipped &&
+         "cannot set a body if it was skipped");
+
+  Body = S;
+  setBodyKind(NewBodyKind);
+
+  // Need to recompute init body kind.
+  if (NewBodyKind < BodyKind::TypeChecked) {
+    if (auto *ctor = dyn_cast<ConstructorDecl>(this))
+      ctor->clearCachedDelegatingOrChainedInitKind();
+  }
 }
 
 SourceRange AbstractFunctionDecl::getBodySourceRange() const {
@@ -7405,8 +7427,11 @@ ConstructorDecl::getDelegatingOrChainedInitKind(DiagnosticEngine *diags,
 
   // If we already computed the result, return it.
   if (Bits.ConstructorDecl.ComputedBodyInitKind) {
-    return static_cast<BodyInitKind>(
-             Bits.ConstructorDecl.ComputedBodyInitKind - 1);
+    auto Kind = static_cast<BodyInitKind>(
+        Bits.ConstructorDecl.ComputedBodyInitKind - 1);
+    assert((Kind == BodyInitKind::None || !init) &&
+           "can't return cached result with the init expr");
+    return Kind;
   }
 
 
@@ -7652,6 +7677,12 @@ bool FuncDecl::isPotentialIBActionTarget() const {
   return isInstanceMember() &&
     getDeclContext()->getSelfClassDecl() &&
     !isa<AccessorDecl>(this);
+}
+
+void FuncDecl::setHasTopLevelLocalContextCaptures(bool hasCaptures) {
+  assert(!hasCaptures || isa<SourceFile>(getDeclContext()));
+  
+  Bits.FuncDecl.HasTopLevelLocalContextCaptures = hasCaptures;
 }
 
 Type TypeBase::getSwiftNewtypeUnderlyingType() {
