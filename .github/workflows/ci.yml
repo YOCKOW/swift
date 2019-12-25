@@ -15,6 +15,9 @@ jobs:
           - macOS-latest
     runs-on: ${{ matrix.os }}
     steps:
+    - if: runner.os == 'Linux'
+      name: Install Required Libraries (Linux)
+      run: sudo apt -y install git cmake ninja-build clang python uuid-dev libicu-dev icu-devtools libedit-dev libxml2-dev libsqlite3-dev swig libpython-dev libncurses5-dev pkg-config libcurl4-openssl-dev systemtap-sdt-dev tzdata rsync
     - uses: actions/checkout@v2
     - name: Clone Required Repositories
       run: ./utils/update-checkout --clone
