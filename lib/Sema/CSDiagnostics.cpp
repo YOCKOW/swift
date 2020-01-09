@@ -1853,6 +1853,9 @@ bool ContextualFailure::diagnoseAsError() {
                      getFromType(), getToType());
       return true;
     }
+    
+    if (diagnoseCoercionToUnrelatedType())
+      return true;
 
     return false;
   }
@@ -1900,6 +1903,20 @@ bool ContextualFailure::diagnoseAsError() {
       return true;
 
     diagnostic = diag::cannot_convert_condition_value;
+    break;
+  }
+      
+  case ConstraintLocator::InstanceType: {
+    if (diagnoseCoercionToUnrelatedType())
+      return true;
+    break;
+  }
+
+  case ConstraintLocator::TernaryBranch: {
+    auto *ifExpr = cast<IfExpr>(getRawAnchor());
+    fromType = getType(ifExpr->getThenExpr());
+    toType = getType(ifExpr->getElseExpr());
+    diagnostic = diag::if_expr_cases_mismatch;
     break;
   }
 
@@ -2218,6 +2235,29 @@ bool ContextualFailure::diagnoseMissingFunctionCall() const {
   tryComputedPropertyFixIts(anchor);
 
   return true;
+}
+
+bool ContextualFailure::diagnoseCoercionToUnrelatedType() const {
+  auto *anchor = getAnchor();
+  
+  if (auto *coerceExpr = dyn_cast<CoerceExpr>(anchor)) {
+    auto fromType = getType(coerceExpr->getSubExpr());
+    auto toType = getType(coerceExpr->getCastTypeLoc());
+    
+    auto diagnostic =
+        getDiagnosticFor(CTP_CoerceOperand,
+                         /*forProtocol=*/toType->isExistentialType());
+    
+    auto diag =
+        emitDiagnostic(anchor->getLoc(), *diagnostic, fromType, toType);
+    diag.highlight(anchor->getSourceRange());
+
+    (void)tryFixIts(diag);
+    
+    return true;
+  }
+
+  return false;
 }
 
 bool ContextualFailure::diagnoseConversionToBool() const {
@@ -2565,6 +2605,10 @@ bool ContextualFailure::trySequenceSubsequenceFixIts(
   if (getFromType()->isEqual(Substring)) {
     if (getToType()->isEqual(String)) {
       auto *anchor = getAnchor()->getSemanticsProvidingExpr();
+      if (auto *CE = dyn_cast<CoerceExpr>(anchor)) {
+        anchor = CE->getSubExpr();
+      }
+      
       auto range = anchor->getSourceRange();
       diagnostic.fixItInsert(range.Start, "String(");
       diagnostic.fixItInsertAfter(range.End, ")");
@@ -3778,6 +3822,21 @@ bool MissingArgumentsFailure::diagnoseAsError() {
   }
 
   return true;
+}
+
+bool MissingArgumentsFailure::diagnoseAsNote() {
+  auto *locator = getLocator();
+  if (auto overload = getChoiceFor(locator)) {
+    auto *fn = resolveType(overload->openedType)->getAs<AnyFunctionType>();
+    auto loc = overload->choice.getDecl()->getLoc();
+    if (loc.isInvalid())
+      loc = getAnchor()->getLoc();
+    emitDiagnostic(loc, diag::candidate_partial_match,
+                   fn->getParamListAsString(fn->getParams()));
+    return true;
+  }
+
+  return false;
 }
 
 bool MissingArgumentsFailure::diagnoseSingleMissingArgument() const {
