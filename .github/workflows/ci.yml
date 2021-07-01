@@ -1,0 +1,35 @@
+# Expected to be used on your own forked repository from 'apple/swift'.
+name: CI
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - '!**'
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macOS-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+    - if: runner.os == 'Linux'
+      name: Install Required Libraries (Linux)
+      run: sudo apt -y install git cmake ninja-build clang python uuid-dev libicu-dev icu-devtools libedit-dev libxml2-dev libsqlite3-dev swig libpython2-dev libncurses5-dev pkg-config libcurl4-openssl-dev systemtap-sdt-dev tzdata rsync
+    - uses: actions/checkout@v2
+    - name: Install Python modules
+      run: |
+        curl -kL https://bootstrap.pypa.io/pip/2.7/get-pip.py | python
+        python -m pip install six
+    - name: Clone Required Repositories
+      run: ./utils/update-checkout --clone
+      continue-on-error: true
+    - name: Create Symbolic Links (Required in GitHub Actions...)
+      run: ln -s $(dirname "${GITHUB_WORKSPACE}")/llvm-project/{'clang','clang-tools-extra','compiler-rt','libcxx','lldb','llvm'} ../
+    - name: Show Installed Repositories
+      run: ls -la ../
+    - name: Build and Run tests
+      run: ./utils/build-script -RT
